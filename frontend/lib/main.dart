@@ -27,7 +27,7 @@ class _VitableAppState extends State<VitableApp> {
       apiService: ChatApiService(
         // Backend URL — update for production deployment.
         // For local dev: http://localhost:8000
-        baseUrl: 'http://localhost:8000',
+        baseUrl: 'https://vitable-takehome-backend.onrender.com',
       ),
     );
   }
