@@ -1,0 +1,35 @@
+name: vitable_chat
+description: Vitable Health Scheduling Chat
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  signals_flutter: ^6.2.0
+
+  # Networking
+  dio: ^5.7.0
+
+  # URL launching (Google Calendar, Apple Calendar web)
+  url_launcher: ^6.3.1
+
+  # Session ID generation
+  uuid: ^4.5.1
+
+  # Mobile ICS file handling
+  path_provider: ^2.1.2
+  share_plus: ^10.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
