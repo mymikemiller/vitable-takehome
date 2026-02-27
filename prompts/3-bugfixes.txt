@@ -1,0 +1,9 @@
+When the app first loads, the ai should produce a friendly message asking the user what concern they have.
+
+When the ai's message is finished animating, focus should be brought to the message field so the user can begin typing their message
+
+In the "Here is what I have" scheduling confirmation message message from the ai, the date is displayed as "2026-02-27". It should be presented to the user in a more readable format, i.e. "February 27, 2026". Also the time should be displayed as 3:00 PM, not 15:00. Dates and times should always be presented to the user in this more readable format.
+
+When I replied affirmatively to the appointment confirmation message, the ai erroneously responded "The selected appointment time appears to be in the past. Please choose a future date and time." 3 PM is 2.5 hours from now; the appointment booking should not have failed. I suspect this is due to differences between UTC and my local time zone.
+
+Now that the backend is deployed on a server that does not necessarily have the same time zone as the user, the add-to-calendar times are not correct and the ai is erroneously reporting that dates in the near future are in the past. Please make sure both the backend and frontend code agree on the time zone of the dates/times used. Messages coming from the user will be in the user's local time zone and dates/times should always be displayed to the user in their local time zone.

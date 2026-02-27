@@ -1,0 +1,472 @@
+You are implementing a production-quality Flutter chat application.
+
+This is not a demo. Write clean, extensible, well-structured code suitable for a serious, cross-platform app.
+
+---
+
+# PLATFORMS (NON-NEGOTIABLE)
+
+This application must run from a single Flutter codebase on:
+
+* iOS
+* Android
+* Web
+
+No platform forks unless strictly necessary.
+
+---
+
+# BACKEND CONTRACT
+
+The backend already exists in:
+
+```
+../backend
+```
+
+You may read it for reference.
+You may NOT modify it.
+
+API:
+
+POST /chat
+
+Request:
+
+```
+{
+  "session_id": String,
+  "message": String
+}
+```
+
+Response:
+
+```
+{
+  "session_id": String,
+  "assistant_message": String
+}
+```
+
+Important:
+
+* Session state lives entirely server-side.
+* The client sends exactly one message at a time.
+* The backend will always return exactly one assistant_message.
+* The backend will not stream responses.
+* The backend will not return multiple assistant messages in one response.
+
+Therefore:
+
+Chat history will always be strictly alternating:
+User → Assistant → User → Assistant
+
+Do NOT resend message history.
+
+Do NOT coalesce messages.
+
+---
+
+# MESSAGE SENDING RULES (CRITICAL)
+
+Do NOT allow multiple messages while waiting for server response.
+
+When a user sends a message:
+
+* Disable Send button immediately.
+* Disable Enter-to-send immediately.
+* User cannot send another message until:
+
+  * Response is received
+  * Typing animation completes
+
+Keyboard behavior:
+
+* Enter → Send message
+* Shift + Enter → Insert newline
+* Cmd + Enter (Mac Web) → Insert newline
+* Send only triggers when plain Enter is pressed without modifiers
+
+No message coalescing logic is needed.
+
+---
+
+# ARCHITECTURE (NON-NEGOTIABLE)
+
+Use Signals for state management.
+
+Signals are the single source of truth.
+
+Do NOT use:
+
+* setState
+* Riverpod
+* Bloc
+* Provider
+* Any other state management solution
+* Global mutable singletons
+
+Instantiate ChatController in main.dart.
+Inject it via constructors.
+
+Project structure:
+
+```
+lib/
+  main.dart
+  theme/
+    app_theme.dart
+  models/
+    chat_message.dart
+  state/
+    chat_controller.dart
+  services/
+    chat_api_service.dart
+  ui/
+    chat_screen.dart
+    message_bubble.dart
+    typing_indicator.dart
+    calendar_buttons.dart
+```
+
+Rules:
+
+* ChatController owns all Signals and business logic.
+* ChatApiService is stateless and handles dio + CancelToken only.
+* UI layer contains zero networking logic.
+* Service layer contains zero UI logic.
+* App must be extensible and production-ready.
+
+---
+
+# MESSAGE MODEL
+
+Immutable ChatMessage:
+
+* id (String)
+* text (String)
+* isUser (bool)
+* timestamp (DateTime)
+* isError (bool, default false)
+
+Do NOT display timestamps.
+
+Messages do NOT persist across restarts.
+
+Text in all bubbles must be selectable and copyable.
+
+---
+
+# NETWORKING
+
+Use dio with CancelToken.
+
+Flow:
+
+When user presses Send:
+
+1. Append user message immediately.
+2. Disable input + send.
+3. Fire POST request.
+
+If request fails:
+
+* Insert error bubble:
+  "Something went wrong. Tap to retry."
+* Re-enable send.
+* Retry removes error bubble and resends last user message.
+
+No exponential backoff.
+
+---
+
+# TYPING SIMULATION (VERY IMPORTANT)
+
+When user sends a message:
+
+1. Start fixed 650ms "reading delay" timer.
+2. Fire network request immediately in parallel.
+
+If response arrives before 650ms:
+
+* Cancel delay.
+* Do NOT show typing indicator.
+* Immediately begin character animation.
+
+If 650ms passes before response:
+
+* Show typing indicator (animated three dots).
+* Indicator remains visible until character animation begins.
+
+When response arrives:
+
+* Remove typing indicator.
+* Insert AI message bubble immediately.
+* Animate text character-by-character.
+
+---
+
+# AI MESSAGE RENDERING
+
+Behavior must feel modern and AI-powered.
+
+When inserting assistant message:
+
+Initial layout behavior:
+
+* Bubble appears at single-line height.
+* Expands horizontally up to 80% max width.
+* Then grows vertically as lines wrap.
+
+Character animation:
+
+* Base delay: 17ms
+* Add jitter: random 0–8ms per character
+* Only animate most recent assistant message
+
+During animation:
+
+* Show blinking cursor |
+* Cursor disappears immediately on completion
+
+On completion:
+
+* Remove cursor
+* Apply subtle micro-scale animation:
+  Scale: 0.98 → 1.0
+  Duration: ~150ms
+
+Do NOT allow user to interrupt animation.
+User cannot send until animation completes.
+
+---
+
+# PERFORMANCE GUARDRAILS (CRITICAL)
+
+Do NOT rebuild entire message list per character.
+
+Only the animating Text widget may rebuild during typing.
+
+The following must NOT rebuild per character:
+
+* Scaffold
+* ListView
+* ChatScreen
+* Parent layout
+* Input bar
+
+Scope Signal listeners tightly to message widgets.
+
+Must maintain smooth 60fps on Web.
+
+---
+
+# SCROLLING BEHAVIOR (IMPORTANT)
+
+Auto-scroll to bottom on:
+
+* New message
+* Each animation step
+* Typing indicator appearance
+
+CRITICAL:
+
+If message list fills the screen and typing indicator appears:
+
+The chat must scroll so the typing indicator is fully visible above the input bar.
+
+The typing indicator must never be partially obscured.
+
+If animation is cancelled (rare edge case), ensure scroll is fully at bottom.
+
+Must work with:
+
+* Touch scroll (mobile)
+* Mouse wheel (web)
+* Trackpad (web)
+
+---
+
+# DATE CORRECTNESS (CRITICAL FOR SCHEDULING APP)
+
+This is a scheduling assistant.
+
+Dates must be correct.
+
+Rules:
+
+* Display all dates in 12-hour format with AM/PM.
+* Example: February 27, 2026 at 9:00 AM
+* Never display 24-hour time in UI.
+
+When assistant message includes confirmed appointment (contains date + time):
+
+Parse date safely.
+
+Do NOT rely on naive string matching.
+
+Use DateTime parsing where possible.
+
+If parsing fails, gracefully skip calendar buttons.
+
+---
+
+# ADD TO CALENDAR BUTTONS
+
+When assistant message confirms an appointment:
+
+Render two buttons below the assistant bubble:
+
+1. "Add to Google Calendar"
+2. "Add to Apple Calendar"
+
+They must appear side-by-side.
+
+Both must be functional.
+
+---
+
+## Google Calendar Button
+
+On click:
+
+Launch URL:
+
+[https://calendar.google.com/calendar/render?action=TEMPLATE](https://calendar.google.com/calendar/render?action=TEMPLATE)
+
+Include:
+
+* text (appointment title)
+* dates (start/end in UTC format: YYYYMMDDTHHMMSSZ)
+* details (visit type)
+* location (Vitable Health)
+* duration = 60 minutes
+
+Use url_launcher.
+
+---
+
+## Apple Calendar Button
+
+Generate .ics file dynamically.
+
+Content must include:
+
+* BEGIN:VCALENDAR
+* VERSION:2.0
+* BEGIN:VEVENT
+* UID
+* DTSTAMP
+* DTSTART
+* DTEND
+* SUMMARY
+* DESCRIPTION
+* LOCATION
+* END:VEVENT
+* END:VCALENDAR
+
+Trigger file download on web.
+On mobile, use appropriate file handling.
+
+Do not require additional backend support.
+
+---
+
+# THEMING
+
+Centralize theme in:
+
+theme/app_theme.dart
+
+Color System:
+
+Primary pairing (Vitable brand):
+
+User bubble:
+
+* Background: #bff4c8
+* Text: #003c32
+
+AI bubble:
+
+* Background: #003c32
+* Text: white
+
+Accent buttons:
+
+* #3c6dd8 or #682c46
+
+Chat column background: white
+
+Web outer page background: dark gray (#1e1e1e or similar)
+
+Bubble radius: 16
+Max bubble width: 80%
+
+Do NOT scatter color literals.
+
+---
+
+# RESPONSIVE WEB LAYOUT
+
+On Web:
+
+* Dark gray full-page background.
+* Centered chat window.
+* Chat column max width: 720–900px.
+* Add subtle border around chat window.
+* White background inside chat container.
+
+Ensure layout looks intentional on large screens.
+
+Support:
+
+* Hover states
+* Pointer cursor on clickable elements
+* Proper focus handling
+
+---
+
+# MOBILE LAYOUT
+
+* Edge-to-edge layout.
+* Respect safe areas.
+* Clean input bar.
+* No layout jumps during animation.
+
+---
+
+# NO MARKDOWN
+
+Render all messages as plain text only.
+
+---
+
+# CODE QUALITY
+
+* Clean
+* Readable
+* Production-ready
+* Well-commented where helpful
+* No unnecessary abstractions
+* No experimental hacks
+
+---
+
+# GOAL
+
+Deliver a modern AI-style scheduling chat application that:
+
+* Uses Signals correctly
+* Runs on iOS, Android, Web
+* Has realistic typing simulation
+* Has robust scroll behavior
+* Has correct scheduling date display
+* Includes working Google + Apple calendar integration
+* Maintains strict performance discipline
+* Feels production-ready
+
+Generate complete Flutter codebase.
+
+Do not include explanatory commentary outside the generated files.

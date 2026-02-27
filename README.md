@@ -150,3 +150,9 @@ The backend is deployed as a Render **Web Service** running `uvicorn main:app --
 The frontend is deployed as a Render **Static Site** built with `flutter build web --release`. The build output directory is `build/web`.
 
 Both services are on the free tier, which suspends instances after 15 minutes of inactivity. The first request after a cold start may take 30–60 seconds. This is a deployment constraint, not an application issue.
+
+---
+
+## Code Generation Notes
+
+All code in this project was generated with Claude Code 2.1.62 and the prompts can be seen in the `/prompts` folder

@@ -1,0 +1,288 @@
+You are a senior Python backend engineer. Generate a complete, production-quality FastAPI backend for a virtual scheduling assistant for Vitable Health. Do not ask clarification questions. All architectural decisions are specified below.
+
+========================================
+MODEL + API CONFIGURATION
+
+Use Python 3.11+
+Use FastAPI
+Use Pydantic
+Use the official Anthropic Python SDK
+
+Use model: claude-sonnet-4-6 (must be used exactly as written)
+
+Use structured prompting (NOT tool use, NOT streaming)
+
+Claude must always respond with a single valid JSON object
+
+Run locally with:
+uvicorn main:app --reload
+
+========================================
+ARCHITECTURE OVERVIEW
+
+System Components:
+
+FastAPI Application
+
+* Single file: main.py
+* Expose POST /chat endpoint
+
+In-Memory State Store (server resets = clean slate)
+
+* sessions: Dict[str, ConversationState]
+* scheduled_appointments: Dict[str, List[ScheduledAppointment]]
+
+Anthropic Client configured with claude-sonnet-4-6
+
+Pydantic models for:
+
+* ChatRequest
+* ChatResponse
+* ConversationState
+* ClaudeStructuredResponse
+* ScheduledAppointment
+* CalendarEvent
+
+========================================
+REQUEST FORMAT
+
+POST /chat
+
+Request JSON:
+{
+  "session_id": "string (UUID from client)",
+  "message": "string"
+}
+
+The client generates and persists session_id.
+
+========================================
+CLAUDE STRUCTURED RESPONSE FORMAT
+
+Claude must ALWAYS return valid JSON with:
+
+{
+  "assistant_message": "string",
+  "full_name": "string or null",
+  "reason_for_visit": "string or null",
+  "visit_category": "string or null",
+  "preferred_date": "YYYY-MM-DD or null",
+  "preferred_time": "HH:MM (24hr) or null",
+  "contact_info": "string or null",
+  "confirm_ready": true | false,
+  "book_now": true | false,
+  "is_emergency": true | false
+}
+
+Additional backend-generated response field (NOT produced by Claude):
+
+{
+  "calendar_event": {
+    "title": "string",
+    "start_iso": "ISO 8601 datetime",
+    "end_iso": "ISO 8601 datetime",
+    "description": "string",
+    "location": "string or null"
+  } | null
+}
+
+Rules for Claude:
+
+* Professional tone.
+* No emojis.
+* No medical advice.
+* Ask only for missing fields.
+* If emergency detected:
+  * set is_emergency = true
+  * set confirm_ready = false
+  * set book_now = false
+  * halt scheduling
+
+========================================
+STRICT CONVERSATION TURN DISCIPLINE
+
+The backend must:
+
+* Return exactly ONE assistant_message per request.
+* Never generate two assistant messages in one cycle.
+* Never generate a confirmation summary AND a booking confirmation in the same response.
+* Never suppress a Claude-generated message accidentally.
+* Never overwrite assistant_message after it is set.
+
+If book_now == true:
+
+* Claude must set assistant_message = "" (empty string).
+* Backend will generate the final confirmation message itself.
+* Only one message is returned to the client.
+
+========================================
+DATE + TIME HANDLING (CRITICAL)
+
+Use server current date (datetime.utcnow()) as ground truth.
+
+All natural language dates must be interpreted relative to current server date.
+
+Never hallucinate future months.
+
+If ambiguity exists (e.g., unclear morning vs afternoon), ask clarification instead of guessing.
+
+Convert preferred_date + preferred_time into timezone-aware UTC datetime.
+
+Store internally in ISO 8601 format.
+
+All appointments are 60 minutes.
+
+Examples:
+
+* “tomorrow morning” → next calendar day
+* “next Monday” → next upcoming Monday
+* “this Friday” → upcoming Friday (if future), not past
+
+========================================
+APPOINTMENT RULES
+
+All appointments are 60 minutes.
+
+Prevent overlapping time windows per session.
+
+Conflict detection:
+
+* Convert preferred_date + preferred_time to datetime.
+* Block scheduling if overlaps with any existing appointment in scheduled_appointments[session_id].
+
+========================================
+SCHEDULING FLOW (TWO-STEP CONFIRMATION)
+
+STEP 1 — Intake Phase
+
+Claude collects:
+
+* full_name
+* contact_info
+* reason_for_visit
+* visit_category
+* preferred_date
+* preferred_time
+
+When all required fields are present:
+
+* Claude sets confirm_ready = true
+* Claude sets book_now = false
+* Claude generates assistant_message summarizing details
+
+Example:
+
+"Here’s what I have:
+
+Name: John Smith
+Visit: General Consultation
+Date: 2026-02-27
+Time: 09:00
+
+Shall I book this?"
+
+Backend does NOT schedule yet.
+
+STEP 2 — User Confirmation
+
+If user responds affirmatively AND Claude sets:
+
+* book_now = true
+* assistant_message = ""
+
+Then backend must:
+
+* Validate no emergency.
+* Validate no conflict.
+* Call schedule_appointment() stub synchronously.
+* Store ScheduledAppointment in scheduled_appointments.
+* Generate final confirmation message.
+
+Example:
+
+"Done! Your General Consultation appointment on February 27 at 9:00 AM is confirmed (ID: 48291). Is there anything else I can help you with?"
+
+* Generate calendar_event object.
+
+* Clear from ConversationState:
+
+  * reason_for_visit
+  * visit_category
+  * preferred_date
+  * preferred_time
+  * confirm_ready
+  * book_now
+
+* RETAIN:
+
+  * full_name
+  * contact_info
+
+This allows user to book another appointment without re-entering identity.
+
+========================================
+EMERGENCY HANDLING
+
+If is_emergency == true:
+
+* Immediately return emergency instruction message.
+* Do NOT continue scheduling.
+* Do NOT call schedule_appointment.
+* Do NOT modify appointment lists.
+
+========================================
+REQUEST FLOW
+
+Receive POST /chat
+
+Retrieve or initialize ConversationState
+
+Build system prompt including:
+
+* Current state values
+* Current server date
+* Instruction to fill only missing fields
+* Strict JSON response requirement
+* Instruction to follow two-step booking process
+
+Call Anthropic API
+
+Parse response using Pydantic
+
+Update ConversationState
+
+Evaluate scheduling logic
+
+Generate single assistant_message
+
+Return ChatResponse with:
+
+* assistant_message
+* calendar_event (if booking occurred)
+
+========================================
+CODE REQUIREMENTS
+
+Include complete working main.py
+Include requirements.txt
+
+Use clear, structured, readable code
+
+Include inline comments explaining:
+
+* State management
+* JSON validation
+* Conflict detection
+* Emergency handling
+* Two-step scheduling trigger logic
+* Turn-discipline enforcement
+
+Include schedule_appointment() stub that simulates external API call
+
+Generate ISO 8601 calendar_event timestamps
+
+Ensure code is production-ready
+
+Generate complete ready-to-run code.
+
+Do not include explanatory text outside of the generated files.
