@@ -124,6 +124,8 @@ class ChatController {
         sessionId: _sessionId,
         message: text,
         cancelToken: _cancelToken!,
+        // Computed fresh each turn so DST transitions mid-session are handled.
+        utcOffsetMinutes: DateTime.now().timeZoneOffset.inMinutes,
       );
     } on DioException catch (e) {
       if (!CancelToken.isCancel(e)) {

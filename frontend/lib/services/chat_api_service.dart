@@ -30,10 +30,15 @@ class ChatApiService {
     required String sessionId,
     required String message,
     required CancelToken cancelToken,
+    required int utcOffsetMinutes,
   }) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/chat',
-      data: {'session_id': sessionId, 'message': message},
+      data: {
+        'session_id': sessionId,
+        'message': message,
+        'utc_offset_minutes': utcOffsetMinutes,
+      },
       cancelToken: cancelToken,
     );
 

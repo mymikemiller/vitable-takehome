@@ -61,6 +61,10 @@ class ChatRequest(BaseModel):
     """Inbound request from client."""
     session_id: str = Field(..., description="UUID generated and persisted by the client")
     message: str = Field(..., description="User's message text")
+    utc_offset_minutes: Optional[int] = Field(
+        None,
+        description="Client's UTC offset in signed minutes, e.g. -300 for EST, 330 for IST",
+    )
 
 
 class CalendarEvent(BaseModel):
@@ -102,6 +106,10 @@ class ConversationState(BaseModel):
     preferred_time: Optional[str] = None    # HH:MM (24-hour)
     confirm_ready: bool = False
     book_now: bool = False
+
+    # Client's UTC offset in signed minutes — updated on every turn so DST
+    # transitions mid-session are handled correctly.  None until first request.
+    utc_offset_minutes: Optional[int] = None
 
 
 class ClaudeStructuredResponse(BaseModel):
@@ -183,16 +191,23 @@ def has_conflict(session_id: str, start_dt: datetime) -> bool:
 # directly would treat "3:00 PM" as 3 PM UTC, causing past-date false-positives
 # for users in negative-offset timezones.
 # ─────────────────────────────────────────────────────────────────────────────
-def parse_appointment_datetime(date_str: str, time_str: str) -> datetime:
+def parse_appointment_datetime(
+    date_str: str,
+    time_str: str,
+    utc_offset_minutes: Optional[int] = None,
+) -> datetime:
     """
-    Parses "YYYY-MM-DD" + "HH:MM" as local server time and returns a
-    UTC-aware datetime.  Raises ValueError on malformed input.
+    Parses "YYYY-MM-DD" + "HH:MM" as the client's local time and returns a
+    UTC-aware datetime.  Falls back to the server's local timezone only when
+    no client offset is provided.  Raises ValueError on malformed input.
     """
     dt_naive = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-    # Attach the server's local timezone (mirrors the user's clock when running locally).
-    local_tz = datetime.now().astimezone().tzinfo
-    dt_local = dt_naive.replace(tzinfo=local_tz)
-    return dt_local.astimezone(timezone.utc)
+    client_tz = (
+        timezone(timedelta(minutes=utc_offset_minutes))
+        if utc_offset_minutes is not None
+        else datetime.now().astimezone().tzinfo
+    )
+    return dt_naive.replace(tzinfo=client_tz).astimezone(timezone.utc)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -201,8 +216,14 @@ def parse_appointment_datetime(date_str: str, time_str: str) -> datetime:
 # which fields have already been collected and which still need to be asked.
 # ─────────────────────────────────────────────────────────────────────────────
 def build_system_prompt(state: ConversationState) -> str:
-    # Use local server time so "today" matches the user's clock, not UTC.
-    now_local = datetime.now().astimezone()
+    # Use the client's UTC offset so "today" matches the user's calendar,
+    # not the server's timezone (which may differ when deployed remotely).
+    client_tz = (
+        timezone(timedelta(minutes=state.utc_offset_minutes))
+        if state.utc_offset_minutes is not None
+        else datetime.now().astimezone().tzinfo
+    )
+    now_local = datetime.now(client_tz)
     today = now_local.strftime("%Y-%m-%d")
     day_of_week = now_local.strftime("%A")
     tomorrow = (now_local + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -377,6 +398,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
     state.confirm_ready = claude_resp.confirm_ready
     state.book_now = claude_resp.book_now
 
+    # Persist the client's UTC offset so all subsequent datetime operations
+    # (system prompt, booking, display) use the user's local time.
+    if request.utc_offset_minutes is not None:
+        state.utc_offset_minutes = request.utc_offset_minutes
+
     # ── 8. EMERGENCY HANDLING ────────────────────────────────────────────────
     # Emergency short-circuits all scheduling logic.
     # Turn discipline: return Claude's emergency message and nothing else.
@@ -421,7 +447,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
         # Parse preferred_date + preferred_time into a UTC-aware datetime.
         try:
             start_dt = parse_appointment_datetime(
-                state.preferred_date, state.preferred_time  # type: ignore[arg-type]
+                state.preferred_date,                       # type: ignore[arg-type]
+                state.preferred_time,                       # type: ignore[arg-type]
+                utc_offset_minutes=state.utc_offset_minutes,
             )
         except ValueError as exc:
             logger.error("Datetime parse error [session=%s]: %s", session_id, exc)
@@ -490,9 +518,13 @@ async def chat(request: ChatRequest) -> ChatResponse:
             )
         )
 
-        # Build human-readable strings for the confirmation message.
-        # Convert back to local time for display so "3:00 PM" doesn't become "11:00 PM UTC".
-        start_local = start_dt.astimezone()
+        # Convert to the client's local time for the confirmation message display.
+        display_tz = (
+            timezone(timedelta(minutes=state.utc_offset_minutes))
+            if state.utc_offset_minutes is not None
+            else datetime.now().astimezone().tzinfo
+        )
+        start_local = start_dt.astimezone(display_tz)
         readable_date = start_local.strftime("%B %-d, %Y")          # e.g. "February 27, 2026"
         readable_time = start_local.strftime("%-I:%M %p")           # e.g. "3:00 PM"
 
